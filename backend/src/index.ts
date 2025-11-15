@@ -184,6 +184,44 @@ io.on("connection", (socket) => {
       socket.emit("voteError", { message: err.message });
     }
   });
+  socket.on("submitVote", async (payload: { roomCode: string, pollId: number, optionId: number }) => {  
+  try {  
+    await pollService.vote(payload.pollId, payload.optionId, socket.data.user.id);  
+  
+    // Enviar resultados actualizados a todos  
+    const results = await pollService.getPollResults(payload.pollId);  
+    io.to(`room-${payload.roomCode}`).emit("pollResults", results);  
+  
+    // NUEVO: Notificar a toda la sala que alguien votó  
+    io.to(`room-${payload.roomCode}`).emit("userVoted", {  
+      username: socket.data.user.username,  
+      pollId: payload.pollId  
+    });  
+  
+    // Notificar al creador de la votación (TU CÓDIGO EXISTENTE)  
+    const poll = await prisma.poll.findUnique({  
+      where: { id: payload.pollId },  
+      include: { room: true }  
+    });  
+    if (poll && poll.room.creatorId !== socket.data.user.id) {  
+      const sockets = io.sockets.sockets;  
+      for (const [socketId, socketInstance] of sockets) {  
+        if (socketInstance.data.user && socketInstance.data.user.id === poll.room.creatorId) {  
+          socketInstance.emit("voteNotification", {  
+            pollId: payload.pollId,  
+            pollQuestion: poll.question,  
+            votedBy: socket.data.user.username,  
+            roomCode: payload.roomCode,  
+            roomId: poll.roomId  
+          });  
+          break;  
+        }  
+      }  
+    }  
+  } catch (err: any) {  
+    socket.emit("voteError", { message: err.message });  
+  }  
+});
 
   // Cerrar votación
   socket.on("closePoll", async (payload: { roomCode: string, pollId: number }) => {
